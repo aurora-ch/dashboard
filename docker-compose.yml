@@ -5,20 +5,40 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+      args:
+        - VITE_SUPABASE_URL=${VITE_SUPABASE_URL}
+        - VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY}
+        - VITE_VAPI_API_KEY=${VITE_VAPI_API_KEY}
+        - VITE_SUPABASE_EDGE_FUNCTION_NAME=${VITE_SUPABASE_EDGE_FUNCTION_NAME:-}
     container_name: aurora-dashboard
-    ports:
-      - "80:80"
-    environment:
-      # These will be set by Coolify from the environment variables
-      - VITE_SUPABASE_URL=${VITE_SUPABASE_URL}
-      - VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY}
-      - VITE_VAPI_API_KEY=${VITE_VAPI_API_KEY}
-      - VITE_SUPABASE_EDGE_FUNCTION_NAME=${VITE_SUPABASE_EDGE_FUNCTION_NAME}
     restart: unless-stopped
+    ports:
+      - "${PORT:-80}:80"
+    # Traefik labels — Coolify reads these when deploying via Docker Compose.
+    # They override any security-headers middleware Coolify/Traefik would otherwise inject.
+    labels:
+      - "traefik.enable=true"
+      # Custom headers middleware with a permissive-but-safe CSP
+      - >-
+        traefik.http.middlewares.aurora-csp.headers.contentSecurityPolicy=
+        default-src 'self';
+        script-src 'self' 'unsafe-inline';
+        style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+        font-src 'self' data: https://fonts.gstatic.com;
+        img-src 'self' data: https: blob:;
+        connect-src 'self' https://*.supabase.co wss://*.supabase.co https://api.vapi.ai wss://api.vapi.ai https://*.vapi.ai wss://*.vapi.ai;
+        media-src 'self' blob:;
+        worker-src 'self' blob:;
+        object-src 'none';
+        frame-ancestors 'self';
+        base-uri 'self';
+      - "traefik.http.middlewares.aurora-csp.headers.browserXssFilter=false"
+      - "traefik.http.middlewares.aurora-csp.headers.contentTypeNosniff=true"
+      - "traefik.http.middlewares.aurora-csp.headers.frameDeny=false"
+      - "traefik.http.middlewares.aurora-csp.headers.customFrameOptionsValue=SAMEORIGIN"
     networks:
       - aurora-network
 
 networks:
   aurora-network:
     driver: bridge
-

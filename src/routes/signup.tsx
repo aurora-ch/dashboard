@@ -4,11 +4,11 @@ import { useAuthStore } from '@/stores/auth-store'
 import { BusinessSetup } from '@/features/aurora-dashboard/components/business-setup'
 import { ThemeSwitch } from '@/components/theme-switch'
 
-export const Route = createFileRoute('/login')({
-  component: LoginPage,
+export const Route = createFileRoute('/signup')({
+  component: SignupPage,
 })
 
-function LoginPage() {
+function SignupPage() {
   const navigate = useNavigate()
   const { user, loading } = useAuthStore((state) => state.auth)
 
@@ -32,7 +32,7 @@ function LoginPage() {
         <ThemeSwitch />
       </div>
       <BusinessSetup
-        initialView="login"
+        initialView="signup"
         onComplete={() => navigate({ to: '/dashboard' })}
       />
     </div>

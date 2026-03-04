@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { useNavigate } from '@tanstack/react-router'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -9,11 +10,21 @@ import {
 } from '@/components/ui/input-otp'
 import { useAuthStore } from '@/stores/auth-store'
 import { toast } from 'sonner'
-import { Mail, Lock, ArrowLeft, RefreshCw, ShieldCheck, Eye, EyeOff } from 'lucide-react'
+import {
+  Mail,
+  Lock,
+  ArrowLeft,
+  RefreshCw,
+  ShieldCheck,
+  Eye,
+  EyeOff,
+} from 'lucide-react'
 
 type AuthView = 'login' | 'signup' | 'verify-otp'
 
-interface BusinessSetupProps {
+export interface BusinessSetupProps {
+  /** Which form to show initially */
+  initialView: 'login' | 'signup'
   onComplete: () => void
 }
 
@@ -26,40 +37,38 @@ function parseAuthError(error: any): string {
     msg.includes('already registered') ||
     msg.includes('already exists') ||
     msg.includes('User already registered')
-  ) {
+  )
     return 'already-registered'
-  }
+
   if (
     msg.includes('Invalid login credentials') ||
     msg.includes('invalid_credentials') ||
     msg.includes('Invalid email or password')
-  ) {
+  )
     return 'invalid-credentials'
-  }
-  if (
-    msg.includes('Email not confirmed') ||
-    msg.includes('email_not_confirmed')
-  ) {
+
+  if (msg.includes('Email not confirmed') || msg.includes('email_not_confirmed'))
     return 'email-not-confirmed'
-  }
-  if (msg.includes('Token has expired') || msg.includes('otp_expired')) {
+
+  if (msg.includes('Token has expired') || msg.includes('otp_expired'))
     return 'otp-expired'
-  }
+
   if (
     msg.includes('Invalid OTP') ||
     msg.includes('invalid_otp') ||
     msg.includes('Token is invalid')
-  ) {
+  )
     return 'otp-invalid'
-  }
-  if (msg.includes('rate limit') || msg.includes('too many requests')) {
+
+  if (msg.includes('rate limit') || msg.includes('too many requests'))
     return 'rate-limit'
-  }
+
   return msg || 'unknown'
 }
 
-export function BusinessSetup({ onComplete }: BusinessSetupProps) {
-  const [view, setView] = useState<AuthView>('login')
+export function BusinessSetup({ initialView, onComplete }: BusinessSetupProps) {
+  const navigate = useNavigate()
+  const [view, setView] = useState<AuthView>(initialView)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -72,7 +81,6 @@ export function BusinessSetup({ onComplete }: BusinessSetupProps) {
   const { signInWithEmail, signUpWithEmail, verifyOtp, resendOtp } =
     useAuthStore((s) => s.auth)
 
-  // Clear error when user switches view or types
   const clearError = () => setError(null)
 
   const startResendCooldown = () => {
@@ -94,18 +102,14 @@ export function BusinessSetup({ onComplete }: BusinessSetupProps) {
     }
   }, [])
 
-  // ─── Sign In ─────────────────────────────────────────────────────────────────
+  // ─── Sign In ────────────────────────────────────────────────────────────────
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!email.trim() || !password) return
     clearError()
     setIsLoading(true)
 
-    const { error: signInError } = await signInWithEmail(
-      email.trim(),
-      password
-    )
-
+    const { error: signInError } = await signInWithEmail(email.trim(), password)
     setIsLoading(false)
 
     if (!signInError) {
@@ -115,15 +119,12 @@ export function BusinessSetup({ onComplete }: BusinessSetupProps) {
     }
 
     const code = parseAuthError(signInError)
-
     if (code === 'email-not-confirmed') {
       setError(
-        'Your email is not verified yet. Sign up again to receive a new verification code.'
+        'Your email is not verified yet. Go to Sign up to receive a new verification code.'
       )
     } else if (code === 'invalid-credentials') {
-      setError(
-        'Invalid email or password. No account? Click "Create account" below.'
-      )
+      setError("Invalid email or password. No account yet? Sign up.")
     } else if (code === 'rate-limit') {
       setError('Too many attempts. Please wait a moment and try again.')
     } else {
@@ -131,7 +132,7 @@ export function BusinessSetup({ onComplete }: BusinessSetupProps) {
     }
   }
 
-  // ─── Sign Up ─────────────────────────────────────────────────────────────────
+  // ─── Sign Up ────────────────────────────────────────────────────────────────
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!email.trim() || !password) return
@@ -146,18 +147,15 @@ export function BusinessSetup({ onComplete }: BusinessSetupProps) {
       email.trim(),
       password
     )
-
     setIsLoading(false)
 
     if (!signUpError) {
       if (needsVerification) {
-        // OTP sent – move to verification step
         toast.success('Verification code sent! Check your inbox.')
         startResendCooldown()
         setOtp('')
         setView('verify-otp')
       } else {
-        // Email confirmation disabled in project – direct login
         toast.success('Account created! Welcome.')
         onComplete()
       }
@@ -165,7 +163,6 @@ export function BusinessSetup({ onComplete }: BusinessSetupProps) {
     }
 
     const code = parseAuthError(signUpError)
-
     if (code === 'already-registered') {
       setError(
         'An account with this email already exists. Please sign in instead.'
@@ -177,14 +174,13 @@ export function BusinessSetup({ onComplete }: BusinessSetupProps) {
     }
   }
 
-  // ─── Verify OTP ───────────────────────────────────────────────────────────────
+  // ─── Verify OTP ─────────────────────────────────────────────────────────────
   const handleVerifyOtp = async () => {
     if (otp.length !== 6) return
     clearError()
     setIsLoading(true)
 
     const { error: otpError } = await verifyOtp(email.trim(), otp)
-
     setIsLoading(false)
 
     if (!otpError) {
@@ -195,11 +191,8 @@ export function BusinessSetup({ onComplete }: BusinessSetupProps) {
 
     const code = parseAuthError(otpError)
     setOtp('')
-
     if (code === 'otp-expired') {
-      setError(
-        'Verification code expired. Click "Resend code" to get a new one.'
-      )
+      setError('Verification code expired. Click "Resend code" to get a new one.')
     } else if (code === 'otp-invalid') {
       setError('Invalid code. Please check your email and try again.')
     } else {
@@ -214,13 +207,11 @@ export function BusinessSetup({ onComplete }: BusinessSetupProps) {
     }
   }, [otp]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ─── Resend OTP ───────────────────────────────────────────────────────────────
+  // ─── Resend OTP ─────────────────────────────────────────────────────────────
   const handleResend = async () => {
     if (resendCooldown > 0) return
     clearError()
-
     const { error: resendError } = await resendOtp(email.trim())
-
     if (!resendError) {
       toast.success('New verification code sent!')
       startResendCooldown()
@@ -229,23 +220,23 @@ export function BusinessSetup({ onComplete }: BusinessSetupProps) {
     }
   }
 
-  const switchToSignUp = () => {
+  // ─── Navigation helpers ──────────────────────────────────────────────────────
+  const goToSignUp = () => {
     clearError()
     setPassword('')
-    setView('signup')
+    navigate({ to: '/signup' })
   }
 
-  const switchToLogin = () => {
+  const goToSignIn = () => {
     clearError()
     setPassword('')
-    setView('login')
+    navigate({ to: '/login' })
   }
 
-  // ─── OTP Verification View ────────────────────────────────────────────────────
+  // ─── OTP Verification Screen ─────────────────────────────────────────────────
   if (view === 'verify-otp') {
     return (
       <div className="w-full max-w-sm space-y-8">
-        {/* Logo */}
         <div className="flex justify-center">
           <img
             src="/logos/aurora-logo.png"
@@ -297,7 +288,6 @@ export function BusinessSetup({ onComplete }: BusinessSetupProps) {
           )}
         </div>
 
-        {/* Resend */}
         <div className="text-center space-y-3">
           <p className="text-sm text-muted-foreground">Didn't receive it?</p>
           <Button
@@ -317,10 +307,9 @@ export function BusinessSetup({ onComplete }: BusinessSetupProps) {
           </p>
         </div>
 
-        {/* Back */}
         <button
           type="button"
-          onClick={switchToLogin}
+          onClick={goToSignIn}
           className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors mx-auto"
         >
           <ArrowLeft className="h-3.5 w-3.5" />
@@ -332,10 +321,9 @@ export function BusinessSetup({ onComplete }: BusinessSetupProps) {
 
   const isLogin = view === 'login'
 
-  // ─── Login / Sign Up View ─────────────────────────────────────────────────────
+  // ─── Login / Sign Up Screen ──────────────────────────────────────────────────
   return (
     <div className="w-full max-w-sm space-y-8">
-      {/* Logo */}
       <div className="flex justify-center">
         <img
           src="/logos/aurora-logo.png"
@@ -359,7 +347,6 @@ export function BusinessSetup({ onComplete }: BusinessSetupProps) {
         onSubmit={isLogin ? handleSignIn : handleSignUp}
         className="space-y-4"
       >
-        {/* Email */}
         <div className="space-y-1.5">
           <Label htmlFor="auth-email">Work email</Label>
           <div className="relative">
@@ -382,7 +369,6 @@ export function BusinessSetup({ onComplete }: BusinessSetupProps) {
           </div>
         </div>
 
-        {/* Password */}
         <div className="space-y-1.5">
           <Label htmlFor="auth-password">Password</Label>
           <div className="relative">
@@ -415,20 +401,16 @@ export function BusinessSetup({ onComplete }: BusinessSetupProps) {
             </button>
           </div>
           {!isLogin && (
-            <p className="text-xs text-muted-foreground">
-              Minimum 8 characters
-            </p>
+            <p className="text-xs text-muted-foreground">Minimum 8 characters</p>
           )}
         </div>
 
-        {/* Error */}
         {error && (
           <p className="text-sm text-destructive rounded-md bg-destructive/10 px-3 py-2">
             {error}
           </p>
         )}
 
-        {/* Submit */}
         <Button
           type="submit"
           disabled={isLoading || !email.trim() || !password}
@@ -449,16 +431,15 @@ export function BusinessSetup({ onComplete }: BusinessSetupProps) {
         </Button>
       </form>
 
-      {/* Toggle */}
       <p className="text-center text-sm text-muted-foreground">
         {isLogin ? "Don't have an account? " : 'Already have an account? '}
         <button
           type="button"
-          onClick={isLogin ? switchToSignUp : switchToLogin}
+          onClick={isLogin ? goToSignUp : goToSignIn}
           className="font-medium text-foreground underline-offset-4 hover:underline"
           disabled={isLoading}
         >
-          {isLogin ? 'Create account' : 'Sign in'}
+          {isLogin ? 'Sign up' : 'Sign in'}
         </button>
       </p>
     </div>

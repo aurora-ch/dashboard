@@ -1,12 +1,8 @@
-import { createFileRoute } from '@tanstack/react-router'
-import LandingPage from '@/components/landing/LandingPage'
+import { createFileRoute, redirect } from '@tanstack/react-router'
 
 export const Route = createFileRoute('/')({
-  component: IndexPage,
+  beforeLoad: () => {
+    throw redirect({ to: '/dashboard' })
+  },
+  component: () => null,
 })
-
-function IndexPage() {
-  // Always show landing page at root path, regardless of authentication status
-  return <LandingPage />
-}
-

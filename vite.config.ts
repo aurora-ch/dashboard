@@ -21,9 +21,5 @@ export default defineConfig({
   },
   optimizeDeps: {
     include: ['hls.js'],
-    exclude: ['motion', 'framer-motion', 'motion-dom'],
-  },
-  ssr: {
-    noExternal: ['motion', 'framer-motion', 'motion-dom'],
   },
 })

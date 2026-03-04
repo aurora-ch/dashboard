@@ -5,10 +5,11 @@ import {
   signInWithEmail,
   signInWithGoogle,
   signUpWithEmail,
+  verifyEmailOtp,
+  resendVerificationEmail,
   signOut as authSignOut,
   verifyOrCreateCustomerRecord,
 } from '@/lib/auth'
-import { restoreSessionFromCookie, clearCustomerAuth } from '@/lib/custom-auth'
 
 type AuthUser = User
 
@@ -26,7 +27,9 @@ interface AuthState {
       email: string,
       password: string,
       metadata?: { first_name?: string; last_name?: string; phone?: string }
-    ) => Promise<{ error: any }>
+    ) => Promise<{ error: any; needsVerification?: boolean }>
+    verifyOtp: (email: string, token: string) => Promise<{ error: any }>
+    resendOtp: (email: string) => Promise<{ error: any }>
     signOut: () => Promise<void>
     reset: () => void
     initialize: () => Promise<void>
@@ -41,84 +44,82 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     setUser: (user) =>
       set((state) => ({ ...state, auth: { ...state.auth, user } })),
     setSession: (session) => {
-      // Handle both Supabase sessions and custom customer sessions
-      let user: AuthUser | null = null
-      
-      if (session) {
-        if (session.user) {
-          user = session.user as AuthUser
-        } else if ((session as any).user) {
-          user = (session as any).user as AuthUser
-        }
-      }
-      
-      set((state) => ({ 
-        ...state, 
-        auth: { 
-          ...state.auth, 
-          session, 
-          user
-        } 
+      const user = session?.user ?? null
+      set((state) => ({
+        ...state,
+        auth: { ...state.auth, session, user: user as AuthUser | null },
       }))
     },
     setLoading: (loading) =>
       set((state) => ({ ...state, auth: { ...state.auth, loading } })),
-    signInWithEmail: async (email: string, password: string) => {
+
+    signInWithEmail: async (email, password) => {
       const { data, error } = await signInWithEmail(email, password)
       if (data?.session) {
         get().auth.setSession(data.session)
       }
       return { error }
     },
+
     signInWithGoogle: async () => {
       const { error } = await signInWithGoogle()
       return { error }
     },
-    signUpWithEmail: async (
-      email: string,
-      password: string,
-      metadata?: { first_name?: string; last_name?: string; phone?: string }
-    ) => {
+
+    signUpWithEmail: async (email, password, metadata) => {
       const { data, error } = await signUpWithEmail(email, password, metadata)
+      if (error) return { error, needsVerification: false }
+
+      // If a session is returned immediately, user is signed in (email confirmation disabled)
+      if (data?.session) {
+        get().auth.setSession(data.session)
+        return { error: null, needsVerification: false }
+      }
+
+      // User created but needs OTP verification
+      return { error: null, needsVerification: true }
+    },
+
+    verifyOtp: async (email, token) => {
+      const { data, error } = await verifyEmailOtp(email, token)
       if (data?.session) {
         get().auth.setSession(data.session)
       }
       return { error }
     },
+
+    resendOtp: async (email) => {
+      const { error } = await resendVerificationEmail(email)
+      return { error }
+    },
+
     signOut: async () => {
       await authSignOut()
-      clearCustomerAuth() // Clear cookies and localStorage
       get().auth.reset()
     },
+
     reset: () => {
-      clearCustomerAuth() // Clear cookies and localStorage
       set((state) => ({
         ...state,
         auth: { ...state.auth, user: null, session: null },
       }))
     },
+
     initialize: async () => {
       try {
-        // First, try to restore session from cookie (for custom auth)
-        const { session: cookieSession } = await restoreSessionFromCookie()
-        if (cookieSession) {
-          console.log('Restored session from cookie')
-          get().auth.setSession(cookieSession)
-          get().auth.setLoading(false)
-          return
-        }
-        
-        // Check if Supabase is enabled
         if (!isSupabaseEnabled) {
           console.warn('Supabase is not configured. Skipping auth initialization.')
           get().auth.setLoading(false)
           return
         }
 
-        // Get initial session from Supabase
-        const { data: { session }, error } = await supabase.auth.getSession()
+        // Restore persisted session from Supabase (stored in localStorage)
+        const {
+          data: { session },
+          error,
+        } = await supabase.auth.getSession()
+
         if (error) {
-          // Don't throw on network errors, just log them
           if (error.message?.includes('DNS') || error.message?.includes('network')) {
             console.warn('Supabase connection error:', error.message)
             get().auth.setLoading(false)
@@ -126,26 +127,24 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
           }
           throw error
         }
-        
+
         get().auth.setSession(session)
-        
-        // Verify customer record exists for authenticated user
+
         if (session?.user) {
           try {
-          await verifyOrCreateCustomerRecord(session.user)
+            await verifyOrCreateCustomerRecord(session.user)
           } catch (err) {
             console.warn('Failed to verify customer record:', err)
           }
         }
-        
-        // Listen for auth changes
+
+        // Keep session in sync across tabs / token refresh
         supabase.auth.onAuthStateChange(async (_event, session) => {
           get().auth.setSession(session)
-          
-          // Verify customer record when user signs in
+
           if (session?.user) {
             try {
-            await verifyOrCreateCustomerRecord(session.user)
+              await verifyOrCreateCustomerRecord(session.user)
             } catch (err) {
               console.warn('Failed to verify customer record:', err)
             }
@@ -153,7 +152,6 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         })
       } catch (error) {
         console.error('Auth initialization error:', error)
-        // Don't block the app if auth fails
       } finally {
         get().auth.setLoading(false)
       }

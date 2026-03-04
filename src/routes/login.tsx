@@ -1,12 +1,8 @@
-import { createFileRoute } from '@tanstack/react-router'
-import { BusinessSetup } from '@/features/aurora-dashboard/components/business-setup'
-import { Header } from '@/components/layout/header'
-import { Main } from '@/components/layout/main'
-import { ThemeSwitch } from '@/components/theme-switch'
-import { ProfileDropdown } from '@/components/profile-dropdown'
-import { useNavigate } from '@tanstack/react-router'
+import { createFileRoute, useNavigate } from '@tanstack/react-router'
 import { useEffect } from 'react'
 import { useAuthStore } from '@/stores/auth-store'
+import { BusinessSetup } from '@/features/aurora-dashboard/components/business-setup'
+import { ThemeSwitch } from '@/components/theme-switch'
 
 export const Route = createFileRoute('/login')({
   component: LoginPage,
@@ -17,37 +13,27 @@ function LoginPage() {
   const { user, loading } = useAuthStore((state) => state.auth)
 
   useEffect(() => {
-    // If user is already authenticated, redirect to dashboard
     if (!loading && user) {
       navigate({ to: '/dashboard' })
     }
   }, [user, loading, navigate])
 
-  const handleSetupComplete = () => {
-    navigate({ to: '/dashboard' })
-  }
-
   if (loading) {
     return (
       <div className="flex min-h-screen items-center justify-center">
-        <div className="text-lg">Loading...</div>
+        <span className="h-8 w-8 animate-spin rounded-full border-4 border-primary border-t-transparent" />
       </div>
     )
   }
 
-  // If user is authenticated, they will be redirected by useEffect
   return (
-    <>
-      <Header showSidebarTrigger={false}>
-        <div className="ms-auto flex items-center space-x-4">
-          <ThemeSwitch />
-          <ProfileDropdown />
-        </div>
-      </Header>
-      <Main>
-        <BusinessSetup onComplete={handleSetupComplete} />
-      </Main>
-    </>
+    <div className="relative flex min-h-screen items-center justify-center bg-background px-4">
+      {/* Theme toggle – top right */}
+      <div className="absolute right-4 top-4">
+        <ThemeSwitch />
+      </div>
+
+      <BusinessSetup onComplete={() => navigate({ to: '/dashboard' })} />
+    </div>
   )
 }
-

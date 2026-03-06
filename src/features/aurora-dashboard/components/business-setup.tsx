@@ -1,34 +1,16 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
-import {
-  InputOTP,
-  InputOTPGroup,
-  InputOTPSlot,
-} from '@/components/ui/input-otp'
 import { useAuthStore } from '@/stores/auth-store'
 import { toast } from 'sonner'
-import {
-  Mail,
-  Lock,
-  ArrowLeft,
-  RefreshCw,
-  ShieldCheck,
-  Eye,
-  EyeOff,
-} from 'lucide-react'
-
-type AuthView = 'login' | 'signup' | 'verify-otp'
+import { Mail, Lock, ShieldCheck, Eye, EyeOff } from 'lucide-react'
 
 export interface BusinessSetupProps {
-  /** Which form to show initially */
   initialView: 'login' | 'signup'
   onComplete: () => void
 }
-
-const RESEND_COOLDOWN = 60
 
 function parseAuthError(error: any): string {
   const msg: string = error?.message ?? error?.msg ?? String(error ?? '')
@@ -50,16 +32,6 @@ function parseAuthError(error: any): string {
   if (msg.includes('Email not confirmed') || msg.includes('email_not_confirmed'))
     return 'email-not-confirmed'
 
-  if (msg.includes('Token has expired') || msg.includes('otp_expired'))
-    return 'otp-expired'
-
-  if (
-    msg.includes('Invalid OTP') ||
-    msg.includes('invalid_otp') ||
-    msg.includes('Token is invalid')
-  )
-    return 'otp-invalid'
-
   if (msg.includes('rate limit') || msg.includes('too many requests'))
     return 'rate-limit'
 
@@ -68,41 +40,17 @@ function parseAuthError(error: any): string {
 
 export function BusinessSetup({ initialView, onComplete }: BusinessSetupProps) {
   const navigate = useNavigate()
-  const [view, setView] = useState<AuthView>(initialView)
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [showPassword, setShowPassword] = useState(false)
-  const [otp, setOtp] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [resendCooldown, setResendCooldown] = useState(0)
-  const cooldownRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  const { signInWithEmail, signUpWithEmail, verifyOtp, resendOtp } =
-    useAuthStore((s) => s.auth)
+  const { signInWithEmail, signUpWithEmail } = useAuthStore((s) => s.auth)
 
+  const isLogin = initialView === 'login'
   const clearError = () => setError(null)
 
-  const startResendCooldown = () => {
-    setResendCooldown(RESEND_COOLDOWN)
-    cooldownRef.current = setInterval(() => {
-      setResendCooldown((prev) => {
-        if (prev <= 1) {
-          clearInterval(cooldownRef.current!)
-          return 0
-        }
-        return prev - 1
-      })
-    }, 1000)
-  }
-
-  useEffect(() => {
-    return () => {
-      if (cooldownRef.current) clearInterval(cooldownRef.current)
-    }
-  }, [])
-
-  // ─── Sign In ────────────────────────────────────────────────────────────────
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!email.trim() || !password) return
@@ -119,12 +67,8 @@ export function BusinessSetup({ initialView, onComplete }: BusinessSetupProps) {
     }
 
     const code = parseAuthError(signInError)
-    if (code === 'email-not-confirmed') {
-      setError(
-        'Your email is not verified yet. Go to Sign up to receive a new verification code.'
-      )
-    } else if (code === 'invalid-credentials') {
-      setError("Invalid email or password. No account yet? Sign up.")
+    if (code === 'invalid-credentials') {
+      setError('Invalid email or password. No account yet? Sign up.')
     } else if (code === 'rate-limit') {
       setError('Too many attempts. Please wait a moment and try again.')
     } else {
@@ -132,7 +76,6 @@ export function BusinessSetup({ initialView, onComplete }: BusinessSetupProps) {
     }
   }
 
-  // ─── Sign Up ────────────────────────────────────────────────────────────────
   const handleSignUp = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!email.trim() || !password) return
@@ -147,181 +90,40 @@ export function BusinessSetup({ initialView, onComplete }: BusinessSetupProps) {
       email.trim(),
       password
     )
-    setIsLoading(false)
 
-    if (!signUpError) {
-      if (needsVerification) {
-        toast.success('Verification code sent! Check your inbox.')
-        startResendCooldown()
-        setOtp('')
-        setView('verify-otp')
+    if (signUpError) {
+      setIsLoading(false)
+      const code = parseAuthError(signUpError)
+      if (code === 'already-registered') {
+        setError('An account with this email already exists. Please sign in instead.')
+      } else if (code === 'rate-limit') {
+        setError('Too many attempts. Please wait a moment and try again.')
       } else {
-        toast.success('Account created! Welcome.')
-        onComplete()
+        setError(signUpError?.message ?? 'Sign up failed. Please try again.')
       }
       return
     }
 
-    const code = parseAuthError(signUpError)
-    if (code === 'already-registered') {
-      setError(
-        'An account with this email already exists. Please sign in instead.'
-      )
-    } else if (code === 'rate-limit') {
-      setError('Too many attempts. Please wait a moment and try again.')
+    if (needsVerification) {
+      const { error: signInError } = await signInWithEmail(email.trim(), password)
+      setIsLoading(false)
+      if (!signInError) {
+        toast.success('Account created! Welcome to Aurora.')
+        onComplete()
+      } else {
+        setError('Account created — please sign in to continue.')
+        navigate({ to: '/login' })
+      }
     } else {
-      setError(signUpError?.message ?? 'Sign up failed. Please try again.')
-    }
-  }
-
-  // ─── Verify OTP ─────────────────────────────────────────────────────────────
-  const handleVerifyOtp = async () => {
-    if (otp.length !== 6) return
-    clearError()
-    setIsLoading(true)
-
-    const { error: otpError } = await verifyOtp(email.trim(), otp)
-    setIsLoading(false)
-
-    if (!otpError) {
-      toast.success('Email verified! Welcome to Aurora.')
+      setIsLoading(false)
+      toast.success('Account created! Welcome to Aurora.')
       onComplete()
-      return
-    }
-
-    const code = parseAuthError(otpError)
-    setOtp('')
-    if (code === 'otp-expired') {
-      setError('Verification code expired. Click "Resend code" to get a new one.')
-    } else if (code === 'otp-invalid') {
-      setError('Invalid code. Please check your email and try again.')
-    } else {
-      setError(otpError?.message ?? 'Verification failed. Please try again.')
     }
   }
 
-  // Auto-verify when all 6 digits are entered
-  useEffect(() => {
-    if (view === 'verify-otp' && otp.length === 6) {
-      handleVerifyOtp()
-    }
-  }, [otp]) // eslint-disable-line react-hooks/exhaustive-deps
+  const goToSignUp = () => { clearError(); setPassword(''); navigate({ to: '/signup' }) }
+  const goToSignIn = () => { clearError(); setPassword(''); navigate({ to: '/login' }) }
 
-  // ─── Resend OTP ─────────────────────────────────────────────────────────────
-  const handleResend = async () => {
-    if (resendCooldown > 0) return
-    clearError()
-    const { error: resendError } = await resendOtp(email.trim())
-    if (!resendError) {
-      toast.success('New verification code sent!')
-      startResendCooldown()
-    } else {
-      toast.error('Could not resend code. Please try again.')
-    }
-  }
-
-  // ─── Navigation helpers ──────────────────────────────────────────────────────
-  const goToSignUp = () => {
-    clearError()
-    setPassword('')
-    navigate({ to: '/signup' })
-  }
-
-  const goToSignIn = () => {
-    clearError()
-    setPassword('')
-    navigate({ to: '/login' })
-  }
-
-  // ─── OTP Verification Screen ─────────────────────────────────────────────────
-  if (view === 'verify-otp') {
-    return (
-      <div className="w-full max-w-sm space-y-8">
-        <div className="flex justify-center">
-          <img
-            src="/logos/aurora-logo.png"
-            alt="Aurora"
-            className="h-12 w-12 object-contain"
-          />
-        </div>
-
-        <div className="text-center space-y-1">
-          <h1 className="text-2xl font-bold tracking-tight">Check your email</h1>
-          <p className="text-sm text-muted-foreground">
-            We sent a 6-digit code to
-          </p>
-          <p className="text-sm font-medium">{email}</p>
-        </div>
-
-        <div className="space-y-4">
-          <div className="flex flex-col items-center gap-3">
-            <Label className="text-sm text-muted-foreground">
-              Enter verification code
-            </Label>
-            <InputOTP
-              maxLength={6}
-              value={otp}
-              onChange={setOtp}
-              disabled={isLoading}
-              autoFocus
-            >
-              <InputOTPGroup>
-                <InputOTPSlot index={0} className="h-12 w-12 text-lg" />
-                <InputOTPSlot index={1} className="h-12 w-12 text-lg" />
-                <InputOTPSlot index={2} className="h-12 w-12 text-lg" />
-                <InputOTPSlot index={3} className="h-12 w-12 text-lg" />
-                <InputOTPSlot index={4} className="h-12 w-12 text-lg" />
-                <InputOTPSlot index={5} className="h-12 w-12 text-lg" />
-              </InputOTPGroup>
-            </InputOTP>
-          </div>
-
-          {isLoading && (
-            <p className="text-center text-sm text-muted-foreground flex items-center justify-center gap-2">
-              <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-              Verifying…
-            </p>
-          )}
-
-          {error && (
-            <p className="text-center text-sm text-destructive">{error}</p>
-          )}
-        </div>
-
-        <div className="text-center space-y-3">
-          <p className="text-sm text-muted-foreground">Didn't receive it?</p>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={handleResend}
-            disabled={resendCooldown > 0 || isLoading}
-            className="w-full"
-          >
-            <RefreshCw className="mr-2 h-4 w-4" />
-            {resendCooldown > 0
-              ? `Resend code in ${resendCooldown}s`
-              : 'Resend code'}
-          </Button>
-          <p className="text-xs text-muted-foreground">
-            Check your spam folder if you don't see it.
-          </p>
-        </div>
-
-        <button
-          type="button"
-          onClick={goToSignIn}
-          className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground transition-colors mx-auto"
-        >
-          <ArrowLeft className="h-3.5 w-3.5" />
-          Back to sign in
-        </button>
-      </div>
-    )
-  }
-
-  const isLogin = view === 'login'
-
-  // ─── Login / Sign Up Screen ──────────────────────────────────────────────────
   return (
     <div className="w-full max-w-sm space-y-8">
       <div className="flex justify-center">
@@ -355,10 +157,7 @@ export function BusinessSetup({ initialView, onComplete }: BusinessSetupProps) {
               id="auth-email"
               type="email"
               value={email}
-              onChange={(e) => {
-                setEmail(e.target.value)
-                clearError()
-              }}
+              onChange={(e) => { setEmail(e.target.value); clearError() }}
               placeholder="you@company.com"
               required
               disabled={isLoading}
@@ -377,10 +176,7 @@ export function BusinessSetup({ initialView, onComplete }: BusinessSetupProps) {
               id="auth-password"
               type={showPassword ? 'text' : 'password'}
               value={password}
-              onChange={(e) => {
-                setPassword(e.target.value)
-                clearError()
-              }}
+              onChange={(e) => { setPassword(e.target.value); clearError() }}
               placeholder={isLogin ? 'Your password' : 'Min. 8 characters'}
               required
               disabled={isLoading}
@@ -393,11 +189,7 @@ export function BusinessSetup({ initialView, onComplete }: BusinessSetupProps) {
               onClick={() => setShowPassword((v) => !v)}
               className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground transition-colors"
             >
-              {showPassword ? (
-                <EyeOff className="h-4 w-4" />
-              ) : (
-                <Eye className="h-4 w-4" />
-              )}
+              {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
             </button>
           </div>
           {!isLogin && (

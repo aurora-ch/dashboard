@@ -71,7 +71,7 @@ export function AuroraDashboard() {
           </div>
         </Header>
         <Main>
-          <BusinessSetup onComplete={handleSetupComplete} />
+          <BusinessSetup initialView="login" onComplete={handleSetupComplete} />
         </Main>
       </>
     )

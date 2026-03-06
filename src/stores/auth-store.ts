@@ -5,8 +5,6 @@ import {
   signInWithEmail,
   signInWithGoogle,
   signUpWithEmail,
-  verifyEmailOtp,
-  resendVerificationEmail,
   signOut as authSignOut,
   verifyOrCreateCustomerRecord,
 } from '@/lib/auth'
@@ -28,8 +26,6 @@ interface AuthState {
       password: string,
       metadata?: { first_name?: string; last_name?: string; phone?: string }
     ) => Promise<{ error: any; needsVerification?: boolean }>
-    verifyOtp: (email: string, token: string) => Promise<{ error: any }>
-    resendOtp: (email: string) => Promise<{ error: any }>
     signOut: () => Promise<void>
     reset: () => void
     initialize: () => Promise<void>
@@ -41,8 +37,10 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     user: null,
     session: null,
     loading: true,
+
     setUser: (user) =>
       set((state) => ({ ...state, auth: { ...state.auth, user } })),
+
     setSession: (session) => {
       const user = session?.user ?? null
       set((state) => ({
@@ -50,6 +48,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         auth: { ...state.auth, session, user: user as AuthUser | null },
       }))
     },
+
     setLoading: (loading) =>
       set((state) => ({ ...state, auth: { ...state.auth, loading } })),
 
@@ -70,27 +69,12 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       const { data, error } = await signUpWithEmail(email, password, metadata)
       if (error) return { error, needsVerification: false }
 
-      // If a session is returned immediately, user is signed in (email confirmation disabled)
       if (data?.session) {
         get().auth.setSession(data.session)
         return { error: null, needsVerification: false }
       }
 
-      // User created but needs OTP verification
       return { error: null, needsVerification: true }
-    },
-
-    verifyOtp: async (email, token) => {
-      const { data, error } = await verifyEmailOtp(email, token)
-      if (data?.session) {
-        get().auth.setSession(data.session)
-      }
-      return { error }
-    },
-
-    resendOtp: async (email) => {
-      const { error } = await resendVerificationEmail(email)
-      return { error }
     },
 
     signOut: async () => {
@@ -113,11 +97,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
           return
         }
 
-        // Restore persisted session from Supabase (stored in localStorage)
-        const {
-          data: { session },
-          error,
-        } = await supabase.auth.getSession()
+        const { data: { session }, error } = await supabase.auth.getSession()
 
         if (error) {
           if (error.message?.includes('DNS') || error.message?.includes('network')) {
@@ -138,10 +118,8 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
           }
         }
 
-        // Keep session in sync across tabs / token refresh
         supabase.auth.onAuthStateChange(async (_event, session) => {
           get().auth.setSession(session)
-
           if (session?.user) {
             try {
               await verifyOrCreateCustomerRecord(session.user)

@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { useAuthStore } from '@/stores/auth-store'
+import { supabase } from '@/lib/supabase'
 import { toast } from 'sonner'
 import { Mail, Lock, ShieldCheck, Eye, EyeOff } from 'lucide-react'
 
@@ -57,6 +58,24 @@ export function BusinessSetup({ initialView, onComplete }: BusinessSetupProps) {
     clearError()
     setIsLoading(true)
 
+    // Check if this email exists in the signups table before attempting login
+    const { data: signup, error: lookupError } = await supabase
+      .from('signups')
+      .select('id')
+      .eq('email', email.trim().toLowerCase())
+      .maybeSingle()
+
+    if (lookupError) {
+      // Non-blocking: if the check itself fails, proceed with login anyway
+      console.warn('Signup lookup error:', lookupError)
+    } else if (!signup) {
+      setIsLoading(false)
+      setError(
+        "No account found for this email. You probably haven't signed up yet — create an account first."
+      )
+      return
+    }
+
     const { error: signInError } = await signInWithEmail(email.trim(), password)
     setIsLoading(false)
 
@@ -68,7 +87,7 @@ export function BusinessSetup({ initialView, onComplete }: BusinessSetupProps) {
 
     const code = parseAuthError(signInError)
     if (code === 'invalid-credentials') {
-      setError('Invalid email or password. No account yet? Sign up.')
+      setError('Wrong password. Try again or reset your password.')
     } else if (code === 'rate-limit') {
       setError('Too many attempts. Please wait a moment and try again.')
     } else {
@@ -198,9 +217,18 @@ export function BusinessSetup({ initialView, onComplete }: BusinessSetupProps) {
         </div>
 
         {error && (
-          <p className="text-sm text-destructive rounded-md bg-destructive/10 px-3 py-2">
-            {error}
-          </p>
+          <div className="text-sm text-destructive rounded-md bg-destructive/10 px-3 py-2 space-y-1">
+            <p>{error}</p>
+            {error.includes("haven't signed up") && (
+              <button
+                type="button"
+                onClick={goToSignUp}
+                className="font-medium underline underline-offset-2 hover:opacity-80 transition-opacity"
+              >
+                Create an account →
+              </button>
+            )}
+          </div>
         )}
 
         <Button

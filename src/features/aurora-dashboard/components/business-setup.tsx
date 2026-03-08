@@ -39,6 +39,40 @@ function parseAuthError(error: any): string {
   return msg || 'unknown'
 }
 
+/**
+ * Pre-login checks against signups + free_users tables.
+ * Returns null if all good, or an error message string to display.
+ */
+async function checkLoginEligibility(
+  email: string
+): Promise<{ allowed: boolean; reason: 'not-registered' | 'not-allowed' | null }> {
+  const normalised = email.trim().toLowerCase()
+
+  // 1. Is the email registered at all?
+  const { data: signup } = await supabase
+    .from('signups')
+    .select('id')
+    .eq('email', normalised)
+    .maybeSingle()
+
+  if (!signup) {
+    return { allowed: false, reason: 'not-registered' }
+  }
+
+  // 2. Is the user in the free_users (allowed) list?
+  const { data: freeUser } = await supabase
+    .from('free_users')
+    .select('id')
+    .eq('email', normalised)
+    .maybeSingle()
+
+  if (!freeUser) {
+    return { allowed: false, reason: 'not-allowed' }
+  }
+
+  return { allowed: true, reason: null }
+}
+
 export function BusinessSetup({ initialView, onComplete }: BusinessSetupProps) {
   const navigate = useNavigate()
   const [email, setEmail] = useState('')
@@ -46,11 +80,16 @@ export function BusinessSetup({ initialView, onComplete }: BusinessSetupProps) {
   const [showPassword, setShowPassword] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [errorType, setErrorType] = useState<'not-registered' | 'not-allowed' | 'auth' | null>(null)
 
   const { signInWithEmail, signUpWithEmail } = useAuthStore((s) => s.auth)
 
   const isLogin = initialView === 'login'
-  const clearError = () => setError(null)
+
+  const clearError = () => {
+    setError(null)
+    setErrorType(null)
+  }
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -58,36 +97,44 @@ export function BusinessSetup({ initialView, onComplete }: BusinessSetupProps) {
     clearError()
     setIsLoading(true)
 
-    // Check if this email exists in the signups table before attempting login
-    const { data: signup, error: lookupError } = await supabase
-      .from('signups')
-      .select('id')
-      .eq('email', email.trim().toLowerCase())
-      .maybeSingle()
+    // Pre-check: registered + allowed?
+    const { allowed, reason } = await checkLoginEligibility(email)
 
-    if (lookupError) {
-      // Non-blocking: if the check itself fails, proceed with login anyway
-      console.warn('Signup lookup error:', lookupError)
-    } else if (!signup) {
+    if (!allowed) {
       setIsLoading(false)
-      setError(
-        "No account found for this email. You probably haven't signed up yet — create an account first."
-      )
+      setErrorType(reason)
+      if (reason === 'not-registered') {
+        setError(
+          "No account found for this email. You haven't signed up yet — create an account first."
+        )
+      } else {
+        setError(
+          "Your account is not authorised to log in. Please contact Aurora support."
+        )
+      }
       return
     }
 
+    // Attempt login
     const { error: signInError } = await signInWithEmail(email.trim(), password)
-    setIsLoading(false)
 
     if (!signInError) {
+      // Track this login: increment login_count + last_login_at
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        await supabase.rpc('track_user_login', { p_user_id: user.id })
+      }
+      setIsLoading(false)
       toast.success('Welcome back!')
       onComplete()
       return
     }
 
+    setIsLoading(false)
+    setErrorType('auth')
     const code = parseAuthError(signInError)
     if (code === 'invalid-credentials') {
-      setError('Wrong password. Try again or reset your password.')
+      setError('Wrong password. Try again.')
     } else if (code === 'rate-limit') {
       setError('Too many attempts. Please wait a moment and try again.')
     } else {
@@ -115,6 +162,7 @@ export function BusinessSetup({ initialView, onComplete }: BusinessSetupProps) {
       const code = parseAuthError(signUpError)
       if (code === 'already-registered') {
         setError('An account with this email already exists. Please sign in instead.')
+        setErrorType('auth')
       } else if (code === 'rate-limit') {
         setError('Too many attempts. Please wait a moment and try again.')
       } else {
@@ -127,6 +175,10 @@ export function BusinessSetup({ initialView, onComplete }: BusinessSetupProps) {
       const { error: signInError } = await signInWithEmail(email.trim(), password)
       setIsLoading(false)
       if (!signInError) {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          await supabase.rpc('track_user_login', { p_user_id: user.id })
+        }
         toast.success('Account created! Welcome to Aurora.')
         onComplete()
       } else {
@@ -134,6 +186,10 @@ export function BusinessSetup({ initialView, onComplete }: BusinessSetupProps) {
         navigate({ to: '/login' })
       }
     } else {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        await supabase.rpc('track_user_login', { p_user_id: user.id })
+      }
       setIsLoading(false)
       toast.success('Account created! Welcome to Aurora.')
       onComplete()
@@ -217,13 +273,13 @@ export function BusinessSetup({ initialView, onComplete }: BusinessSetupProps) {
         </div>
 
         {error && (
-          <div className="text-sm text-destructive rounded-md bg-destructive/10 px-3 py-2 space-y-1">
+          <div className="text-sm text-destructive rounded-md bg-destructive/10 px-3 py-2 space-y-1.5">
             <p>{error}</p>
-            {error.includes("haven't signed up") && (
+            {errorType === 'not-registered' && (
               <button
                 type="button"
                 onClick={goToSignUp}
-                className="font-medium underline underline-offset-2 hover:opacity-80 transition-opacity"
+                className="font-semibold underline underline-offset-2 hover:opacity-80 transition-opacity"
               >
                 Create an account →
               </button>
